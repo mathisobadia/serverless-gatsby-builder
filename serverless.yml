@@ -1,0 +1,87 @@
+service:
+  name: serverless-gatsby-builder
+# app and org for use with dashboard.serverless.com
+#app: your-app-name
+#org: your-org-name
+
+# Add the serverless-webpack plugin
+plugins:
+  - serverless-webpack
+
+package:
+  individually: true
+# You can pin your service to only deploy with a specific Serverless version
+# Check out our docs for more details
+# frameworkVersion: "=X.X.X"
+custom:
+  webpack:
+    webpackConfig: ./webpack.config.js
+    includeModules:
+      forceInclude: #include all gatsby plugins here
+        - gatsby-plugin-styled-components
+    packager: "yarn" # Packager that will be used to package your external modules
+  stage: "${opt:stage, self:provider.stage}"
+
+provider:
+  name: aws
+  runtime: nodejs12.x
+  region: us-east-1
+  versionFunctions: false
+  stage: ${opt:stage, 'dev'}
+  environment: ${file(env.yml):${self:custom.stage}}
+  apiGateway:
+    minimumCompressionSize: 1024 # Enable gzip compression for responses > 1 KB
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - s3:GetObject
+        - s3:PutObject
+        - s3:DeleteObject
+        - s3:ListBucket
+      Resource:
+        - "arn:aws:s3:::${self:provider.environment.PUBLIC_SITE_BUCKET}/*"
+        - "arn:aws:s3:::${self:provider.environment.PUBLIC_SITE_BUCKET}"
+    # add other required permissions here
+    # - Effect: Allow
+    #   Action:
+    #     - dynamodb:GetItem
+    #     - dynamodb:Query
+    #   Resource:
+    #     - "arn:aws:dynamodb:us-east-1:${self:provider.environment.AWS_ID}:table/${self:provider.environment.EXAMPLE_TABLE}"
+    # - Effect: Allow
+    #   Action:
+    #     - cloudfront:CreateInvalidation
+    #   Resource:
+    #     - "arn:aws:cloudfront::${self:provider.environment.AWS_ID}:distribution/${self:provider.environment.PUBLIC_SITE_DISTRIBUTION_ID}"
+
+functions:
+  build:
+    handler: build.handler
+    timeout: 300
+    events:
+      - sns: publishSite-${opt:stage}
+
+resources:
+  Resources:
+    AppBucket:
+      Type: AWS::S3::Bucket
+      DeletionPolicy: Retain
+      Properties:
+        BucketName: ${self:provider.environment.PUBLIC_SITE_BUCKET}
+        AccessControl: PublicRead
+        WebsiteConfiguration:
+          IndexDocument: index.html
+          ErrorDocument: index.html
+    AppPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        Bucket: !Ref AppBucket
+        PolicyDocument:
+          Id: RepositoryPolicy
+          Version: "2012-10-17"
+          Statement:
+            - Sid: PublicReadForGetBucketObjects
+              Effect: Allow
+              Principal: "*"
+              Action: "s3:GetObject"
+              Resource: "arn:aws:s3:::${self:provider.environment.PUBLIC_SITE_BUCKET}/*"
